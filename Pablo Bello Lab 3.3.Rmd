@@ -1,0 +1,629 @@
+---
+title: "Lab 3"
+author: "Pablo Bello"
+date: "2/7/2020"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE ,message = FALSE, warning = FALSE)
+```
+
+
+
+
+```{r}
+#---Load the network data library
+library(drat)
+drat::addRepo("schochastics")
+library(networkdata)
+#Packages for the lab
+library(igraph)
+library(tidyverse)
+library(labelVector)
+library(qgraph)
+library(corrplot)
+
+#---with the plot() function grpahs look packed. ggnet2 looks a bit nicer and uses ggplot2 commands. 
+library(GGally)
+library(intergraph) #---To coerce graph objects into ggnet2
+library(RColorBrewer)
+library(ggraph)
+
+
+```
+
+```{r}
+#----NEW NETWORKS BECAUSE THE ONES I CHOSE FIRST ARE TOO BIG
+#---After doing most of the lab I have to change my networks because they are too big to run the community detection algorithms on them
+
+ita_gangs <- covert_24  #---- This one works just fine. UNDIRECTED. 67 nodes and 114 edges.
+
+covert <- covert_16 # Network of hyperlinks between domestic terrorist group websites in the United States.UNDIRECTED.32 nodes and 50 edges
+
+books <- polbooks # Nodes represent books about US politics sold by the online bookseller Amazon.com. Edges represent frequent co-purchasing of books by the same buyers, as indicated by the "customers who bought this book also bought these other books" feature on Amazon.DIRECTED. 441 edges and 105 nodes
+
+```
+
+```{r}
+
+#---1) Make a table that contains descriptive network statistics for each network; please include: average degree, standard deviation of degrees if network is undirected (or outdegrees and of indegrees if network is directed), density, transitivity index, and average shortest path.
+Networks <- c ("Italian Gangs" , "Terrorist Web Links" , "Amazon Politics Books")
+network_list <- list (ita_gangs ,covert , books)
+
+mat2 <- sapply(network_list , function(x){ if (is.directed(x)== FALSE){list (
+                                                "Mean Degree" = round(mean(degree(x), na.rm = TRUE),3) , 
+                                                "SD Degree" = round(sd(degree(x), na.rm = TRUE),3),
+                                                "Mean Indegree" = "Not applicable",
+                                                "SD Indegree" = "Not applicable",
+                                                "Mean Outdegree" = "Not applicable",
+                                                "SD Outdegree"  = "Not applicable",
+                                                "Transitivity" = round (transitivity (x),3),
+                                                "Density" = round(edge_density(x),3),
+                                                "Ave. Path Length" = round(average.path.length(x),3),
+                                                "Isolates" =  sum (degree(x) == 0))}
+  
+                                        else {list (
+                                                "Mean Degree" = round(mean(degree(x), na.rm = TRUE),3) , 
+                                                "SD Degree" = round(sd(degree(x), na.rm = TRUE),3),
+                                                "Mean Indegree" = round(mean(degree(x , mode = "in"), na.rm = TRUE),3),
+                                                "SD Indegree" = round(sd(degree(x , mode = "in"), na.rm = TRUE),3),
+                                                "Mean Outdegree" = round(mean(degree(x , mode = "out"), na.rm = TRUE),3),
+                                                "SD Outdegree"  = round(sd(degree(x , mode = "out"), na.rm = TRUE),3),
+                                                "Transitivity" = round (transitivity (x),3),
+                                                "Density" = round(edge_density(x),3),
+                                                "Ave. Path Length" = round(average.path.length(x),3),
+                                                "Isolates" =  sum (degree(x) == 0))}})
+
+
+knitr::kable (mat2 ,
+              caption = "Network Statistics" , 
+              col.names =  c( "Italian Gangs" , "Terrorist Web Links" , "Amazon Politics Books"))
+
+#---I included question 2 into the table. There are no isolates in any of the networks
+```
+
+
+
+```{r}
+#---2) For each network make its random graph “counterpart” (a random graph with the same number of nodes and density as the original)
+set.seed(061295)
+#----Random graph for the italian gangs network-------------#
+nodes <- vcount(ita_gangs)
+density <- edge_density(ita_gangs)
+#--- erdos.renyi.game() for generating random graphs
+random_ita_gangs <- erdos.renyi.game(n = nodes,
+                                     p.or.m = density,
+                                     type = "gnp",
+                                     directed = FALSE )
+
+
+ggnet2(random_ita_gangs , 
+       color = "tomato", 
+       node.size = 2,
+       node.alpha = 1,
+       edge.color = "grey80"
+        ) + 
+  labs (title = "Graph1. Random Counterpart for the Italian Gangs Network") +
+  theme (plot.title = element_text(face= "italic", size = 10))
+
+
+
+#----Random graph for the terrorist websites  network-------------#
+
+nodes <- vcount(covert)
+density <- edge_density(covert)
+
+random_covert <- erdos.renyi.game(n = nodes,
+                                     p.or.m = density,
+                                     type = "gnp",
+                                     directed = FALSE )
+
+ggnet2(random_covert , 
+       color = "mediumorchid2", 
+       node.size = 2,
+       node.alpha = 1,
+       edge.color = "steelblue",
+       edge.alpha = 0.6
+        ) +  
+  labs (title = "Graph2. Random Counterpart for the Terrorist Webs Network") +
+  theme (plot.title = element_text(face= "italic", size = 10))
+
+
+
+#----Random graph for the atp_19_simple  network-------------#
+
+nodes <- vcount(books)
+density <- edge_density(books)
+
+random_books <- erdos.renyi.game(n = nodes,
+                                     p.or.m = density,
+                                     type = "gnp",
+                                     directed = TRUE )  #--- the mean indegree and outdegree remain equal
+
+ggnet2(random_books , directed = TRUE, 
+       arrow.size = 3,
+       arrow.gap = 0.025,
+       color = "gold2", 
+       node.size = 2,
+       node.alpha = 1,
+       edge.color = "springgreen3",
+       edge.alpha = 0.4
+        ) +  
+  labs (title = "Graph3. Random Counterpart for the Politics Books in  Amazon Network") +
+  theme (plot.title = element_text(face= "italic", size = 10))
+```
+
+
+
+```{r}
+#3---------------For each network calculate:----------------#
+# a) degree (both in-degree and out-degree if network is directed), betweenness, closeness, and for each node
+# b) save it in one data frame and calculate correlations between each measure
+
+df_correlations <- sapply(network_list , function(x){ if (is.directed(x)== FALSE){as.data.frame ( cbind (
+                                  "Closeness" = closeness(x),
+                                  "Degree" = degree(x),
+                                  "Betweenness" = betweenness(x , directed = FALSE)))}
+  
+                                   else {as.data.frame (cbind (
+                                     "Closeness" = closeness(x , mode = "out"), 
+                                     "Indegree"  =degree(x  , mode = "in"),
+                                     "Outdegree" = degree(x , mode = "out"),
+                                     "Betweenness" = betweenness(x , directed = TRUE)
+                                                ))}})
+
+#---Closeness centrality. Wikipedia: Sum of the length of the shortest paths between the node and all other nodes in the graph. Thus, the more central a node is, the closer it is to all other nodes.
+#-- the italian gangs networks has two components so closeness cannot be properly calculated. Instead , what igrpah does is "If there is no (directed) path between vertex v and i then the total number of vertices is used in the formula instead of the path length."
+#---In the case of Directed netwroks , closeness can be calculated with in or out ties.
+
+ #---Betweenness centrality for each vertex is the number of shortest paths that pass through the vertex. Same problems that centrality in disconected networks. 
+
+
+#---Correlation table in a Kable
+knitr::kable (cor(df_correlations[[1]]), digits = 2,caption = "Correlation Matrix for Italian Gangs")  #  cor () calculates column correlations
+knitr::kable (cor(df_correlations[[2]]), digits =2, caption = "Correlation Matrix for terrorist webs network")
+knitr::kable(cor(df_correlations[[3]]),digits = 2, caption = "Correlation Matrix for politics books in amazon network")
+
+```
+
+
+
+In the case of the Italian Gangs Network, we can see that degree and betweenness have a close to perfect (0.94). Betweenness centrality which is the number of shortest paths that pass through the node can be almost perfectly predicted just knowing the degree of that particular node. In this network, nodes with high degree are not only well connected but are also brokers in the network. 
+#On the other hand, degree and betweenness centrality don't have such a strong correlation with closeness. This means that highly central nodes with a high degree do not necessarily have the fastest (in terms of length) access to all the nodes. They occupy key positions on the network but they are not necessarily well connected throughout the network. 
+
+
+In the second network, which represents links between terrorist-related websites in the U.S. the three measures are highly correlated (around .8). This could indicate that in this network, central nodes (as measured by betweenness centrality) have a high degree and are short paths to all the nodes in the network. These nodes hold powerful structural positions. The opposite holds for those nodes that are less central. 
+
+
+The third network, because of its different nature (amazon suggestions of books often bought together with the topic of US politics) presents a very different pattern of correlations. The strongest correlations are between outdegree-closeness and indegree-betweenness. Books that send ties to many others tend to be at a smaller distance than any other book in the network. Books that receive many ties are part of short paths between two other books. It's not easy to interpret this without knowing the nuts and bolts of Amazon's system of recommendation.  A clue about this system can be given by the fact that indegree and outdegree are negatively correlated (-.10). This could signal a certain hierarchy between books. Some books get always recommended, "bestsellers" , when you're looking for less well-known books, but when you look for this bestsellers you don't receive recommendations of less well-known books (this would be short of rich-get-richer dynamic, although I suspect that it is a construct of the way data was collected because reciprocity in the network is 0, which is pretty unusual, e.g. you could expect to get recommended book A when you look for book B and vice versa but this never happens in this network). 
+
+
+```{r , fig.dim= 4}
+#  5) Plot each network twice:
+#  a) with the size of node proportional to its degree (in-degree for directed networks)
+#  b) with the size of node proportional to its betweenness
+set.seed (061295)
+
+
+#--------------------Italian gangs network ----------------------#
+#
+#------------Node size proportional to Degree
+
+ggnet2(ita_gangs , 
+       color = "tomato", 
+       node.size = degree(ita_gangs),
+       node.alpha = 1,
+       edge.color = "grey80"
+        ) + 
+  labs (title = "Graph4.  Italian Gangs Network \nNode size proportional to degree")+
+  guides(color = FALSE, size = FALSE) + #-----remove legend
+  theme (plot.title = element_text(face= "italic", size = 12))
+
+#--------------Node size proportional to betweenness
+
+ggnet2(ita_gangs , 
+       color = "tomato", 
+       node.size = betweenness(ita_gangs),
+       node.alpha = 1,
+       edge.color = "grey80"
+        ) + 
+  labs (title = "Graph5.  Italian Gangs Network \nNode size proportional to betweenness")+
+   guides(color = FALSE, size = FALSE) + #-----remove legend
+  theme (plot.title = element_text(face= "italic", size = 12))
+
+
+
+#--------------------Terrorist Websites network ----------------------#
+
+#-----------Node size proportional to degree
+ggnet2(covert , 
+       color = "mediumorchid2", 
+       node.size = 0.1*degree(covert),
+       node.alpha = 1,
+       edge.color = "steelblue",
+       edge.alpha = 0.6
+        ) +  
+  labs (title = "Graph6. Terrorist Websites Network \nNode size proportional to degree") +
+  guides(color = FALSE, size = FALSE) + #-----remove legend
+  theme (plot.title = element_text(face= "italic", size = 12))
+
+
+#--------------Node size proportional to betweenness
+ggnet2(covert , 
+       color = "mediumorchid2", 
+       node.size = betweenness(covert),
+       node.alpha = 1,
+       edge.color = "steelblue",
+       edge.alpha = 0.6
+        ) +  
+  labs (title = "Graph7. Terrorist Websites Network \nNode size proportional to betweenness") +
+  guides(color = FALSE, size = FALSE) + #-----remove legend
+  theme (plot.title = element_text(face= "italic", size = 12))
+
+
+#--------------------Politics Books in Amazon  etwork ----------------------#
+
+#-----------Node size proportional to degree
+ggnet2(books , 
+       directed = TRUE,
+       arrow.size = 3,
+       arrow.gap = 0.025,
+       color = "gold2", 
+       node.size = degree(books),
+       node.alpha = 1,
+       edge.color = "springgreen3",
+       edge.alpha = 0.4
+        ) +  
+  labs (title = "Graph8. Politics Books in Amazon \nNode size proportional to degree") +
+  guides(color = FALSE, size = FALSE) + #-----remove legend
+  theme (plot.title = element_text(face= "italic", size = 12))
+
+
+#--------------Node size proportional to betweenness
+ggnet2(books , 
+       directed = TRUE,
+       arrow.size = 3,
+       arrow.gap = 0.025,
+       color = "gold2", 
+       node.size = betweenness(books),
+       node.alpha = 1,
+       edge.color = "springgreen3",
+       edge.alpha = 0.4
+        ) +  
+  labs (title = "Graph9. Politics Books in Amazon \nNode size proportional to betweenness") +
+  guides(color = FALSE, size = FALSE) + #-----remove legend
+  theme (plot.title = element_text(face= "italic", size = 12))
+
+
+```
+
+
+
+
+
+```{r}
+
+#---6) How many cliques of minimal size 3 are in each network? What is the size of the largest clique in each network?
+
+cliques <- sapply (network_list , function(x)  list (
+ "Number of cliques "= length (cliques( x , min= 3)),
+  "Max. size of a clique " = clique_num(x)
+))
+
+knitr::kable (cliques,
+              caption = "Size and number of cliques in the Networks",
+              col.names = c ("Italian Gangs" , "Terrorist Websites" , "Amazon Politics Books"))
+
+```
+
+
+```{r}
+
+#7) For each network test whether it is a small world network. Is it a small world network? And describe the network (show what you see, but also use network metrics you calculated before (task 2) as an argument. e.g. a sparse network with several hubs, a network with two visible clusters)
+
+
+small_world <- sapply (network_list , function (x) format (smallworldIndex(x), digits = 3))
+small_world_table <- cbind (Networks , t(small_world)) 
+
+knitr::kable(small_world_table [,c(1,4,5,2,3 ,6)] , 
+             col.names = c ("Network" , "L(actual" , "L(random)" , "C(actual)", "C(random)" , "SmallWorld Index"),
+             caption = "Small Worlds. length (L) and clustering (C) of Actual versus Random Networks")
+
+```
+
+
+
+Table 4 is homologous to table 1 in Watts and Strogatz (1998) in which they compare real networks to their random counterparts regarding the relevant characteristics for small-world networks. These characteristics are average path length and clustering (in this case measured as transitivity). Small-world networks have a higher clustering coefficient but similar average path length than their random counterparts. These kinds of networks are well connected and highly clustered at the same time.
+
+As we can observe, that is the case of these three networks. all of them have similar or even lower average path distances than their random counterparts and clustering coefficients substantially higher than the random networks. The amazon politics books stand out of the others, with a clustering coefficient 6 times higher than its random network and a shorter average path length, which gives it a small world index of 9.95, well over the other two networks. Network size is also a factor that should be taken into account, and in this case, all the networks are relatively small compared to what is usually deemed as small-world networks. But in short, the three networks comply with the minimum requirements to be considered small worlds but in a continuum of smallworldness, the Italian gangs and terrorist websites network would be under the books network.  
+
+For clarification, the small world index is calculated comparing average path length and clustering of the actual networks to random and regular lattice networks. More Precisely : 
+
+$$SWI = \frac{L - L_l}{L_r - L_l} \times \frac{C - C_r}{C_l - C_r}$$
+
+
+```{r}
+
+#---8) Use two community detection algorithms to find communities in each network, and make a plot where nodes are coloured based on their membership.
+
+library(sna)
+library(intergraph) #---To transform networks into graphs and vice versa
+
+#-------- (1/2) Girvan-Newman community detection algorithm--------------------#
+
+
+#------------ITALIAN GANGS NETWORK-----------------------#
+
+#----This algorithm is based on edge betweenness so I calculate it independently to then add it as a weight in to the edges in the plot
+eb <- edge_betweenness(ita_gangs) #----Calculate edge betweenness
+
+#----Clusters with G-N algorithm
+clusters_ita_gangs <- cluster_edge_betweenness(graph = ita_gangs,
+                                  modularity = TRUE,
+                                  membership = TRUE,
+                                  directed = FALSE)
+
+#----- grpah to network object ( from intergraph package)
+g <- asNetwork(ita_gangs)
+
+g %e% "between" <- eb/200 #---add betweenness as attribute to the adges (the sna way)
+g %v% "cluster" <-clusters_ita_gangs$membership #---add cluster as attribute to the vertices (the sna way)
+
+set.seed(061295)
+ggnet2(g ,
+       node.color = "cluster",
+       palette= "Set2",
+       node.size = 3,
+       edge.color = "grey80",
+       edge.size = "between",
+       label = c ("N19" , "N63", "N47", "N18" ,"N4", "N11"),
+       label.size = 3) +
+  guides (color = FALSE) +
+  labs (title = "Graph 10. Italian Gangs Network \nCommunity detection with Girvan-Newman algorithm \nEdge width represents betweenness") + 
+  theme (plot.title = element_text(face= "italic", size = 10))
+
+
+
+##---------LOUVAIN--------------------#
+#It is based on the modularity measure and a hierarchial approach. Initially, each vertex is assigned to a community on its own. In every step, vertices are re-assigned to communities in a local, greedy way: each vertex is moved to the community with which it achieves the highest contribution to modularity. When no vertices can be reassigned, each community is considered a vertex on its own, and the process starts again with the merged communities. The process stops when there is only a single vertex left or when the modularity cannot be increased any more in a step.
+
+
+ita_gangs_louvain <- cluster_louvain(ita_gangs)
+
+ggraph(ita_gangs) + 
+    geom_edge_link(color = "grey80",) + 
+    geom_node_point(aes (size = 1.3 ,alpha = 0.9 ,color = factor (ita_gangs_louvain$membership))) +
+    guides(color = FALSE, size = FALSE , alpha = FALSE) +
+  labs (title = "Graph 11. Italian Gangs Networks \nCommunity detection with Louvain algorithm") +
+  theme (plot.title = element_text(face= "italic", size = 10))
+
+
+```
+
+
+```{r}
+#-------- (2/3) Girvan-Newman community detection algorithm--------------------#
+set.seed(061295)
+#------------TERRORIST WEBSITES NETWORK-----------------------#
+
+
+#----Clusters with G-N algorithm
+clusters_covert <- cluster_edge_betweenness(graph = covert,
+                                  modularity = TRUE,
+                                  membership = TRUE,
+                                  directed = FALSE)
+
+#----Plot the G-N clusters 
+
+ggraph(covert) + 
+    geom_edge_link(color = "steelblue", alpha = 0.8) + 
+    geom_node_point(aes (size = 1.3 ,alpha = 0.9 ,color = factor (clusters_covert$membership))) +
+    guides(color = FALSE, size = FALSE , alpha = FALSE) +
+  labs (title = "Graph 12. Terrorist Websites Network \nCommunity detection with Girvan-Newman algorithm") +
+  theme (plot.title = element_text(face= "italic", size = 10))
+
+
+
+#---------LOUVAIN--------------------#
+
+
+
+covert_louvain <- cluster_louvain(covert)
+
+ggraph(covert) + 
+    geom_edge_link(color = "steelblue", alpha = 0.8) + 
+    geom_node_point(aes (size = 1.3 ,alpha = 0.9 ,color = factor (covert_louvain$membership))) +
+    guides(color = FALSE, size = FALSE , alpha = FALSE) +
+  labs (title = "Graph 13. Terrorist Websites Network \nCommunity detection with Louvain algorithm") +
+  theme (plot.title = element_text(face= "italic", size = 10)) 
+  
+
+```
+
+```{r}
+#-------- (3/3)Amazon Politics Books Network--------------------#
+
+#Since this network is directed I have to switch from algorithms that use modularity to detect communities to those who use random walks , such as walktrap and infomap. Although some algorithms that use modularity may admit directed networks what they do is just disregard the direction of the ties, therefore , they are  not ideal if we want to preserve all the structural information. 
+
+#--------------------INFOMAP-------------------------#
+#Find community structure that minimizes the expected description length of a random walker trajectory
+clusters_books <- cluster_infomap (graph = books , modularity = FALSE)
+  
+  
+#----Plot the infomap clusters 
+
+ggraph(books) + 
+    geom_edge_link(arrow = arrow (length = unit(2, 'mm')),  end_cap = circle(3, 'mm'),color = "springgreen3" , alpha = 0.3) + 
+    geom_node_point(size = 2,aes (color = factor (clusters_books$membership))) +
+    guides(color = FALSE, size = FALSE , alpha = FALSE) +
+  labs (title = "Graph 14. Politics Books in Amazon Network \nCommunity detection with Infomap algorithm") +
+  theme (plot.title = element_text(face= "italic", size = 10))
+
+
+#---------WALKTRAP--------------------#
+
+#Walktrap, developed by Pascal Pons, is an algorithm in graph theory, used to identify communities in large networks via random walks. These random walks are then used to compute distances between nodes. Nodes are then assigned into groups with small intra and larger inter-community distances via bottom-up hierarchical clustering. It should be noted, of course, that this algorithm considers only one community per node, which in some cases can be an incorrect hypothesis. (source : towardsdatscience.com).
+
+books_walktrap <- cluster_walktrap(books, modularity = FALSE)
+
+ggraph(books) + 
+    geom_edge_link(arrow = arrow (length = unit(2, 'mm')),  end_cap = circle(3, 'mm'),color = "springgreen3" , alpha = 0.3) + 
+    geom_node_point(size = 2,aes (color = factor(books_walktrap$membership))) +
+    guides(color = FALSE, size = FALSE , alpha = FALSE) +
+  labs (title = "Graph 15. Politics Books in Amazon Network \nCommunity detection with Walktrap algorithm") +
+  theme (plot.title = element_text(face= "italic", size = 10))
+```
+
+
+
+```{r}
+#---Write how many members are in each community in each network for both community detection algorithms. Comment similarity/differences in the results of the two algorithms.
+
+library(janitor)
+
+cluster_list <- list (clusters_ita_gangs, clusters_covert, clusters_books , ita_gangs_louvain , covert_louvain , books_walktrap)
+
+cluster_table <- sapply (cluster_list , function (x) list (tabyl (dat = x$membership))) #Extracting cluster membership for every node
+
+
+#---------Italian Gangs--------------#
+
+cluster_table [[1]] %>%
+  bind_cols (cluster_table [[4]]) %>% 
+  transmute(Cluster =`x$membership`, "Girvan-Newman"= sort(n) , "Louvain" = sort (n1))  %>%
+knitr::kable (caption = "Italian Gangs. Number of nodes per cluster for both community detection algorithms ")
+
+#-------------Terrorist  Networks-----------------#
+cluster_table[[2]] %>% 
+  bind_cols (cluster_table [[5]])%>% 
+  transmute(Cluster =`x$membership`, "Girvan-Newman"= sort(n) , "Louvain" = sort (n1))  %>% 
+ knitr::kable (caption = "Terrorist Websites. Number of nodes per cluster for both community detection algorithms ")
+
+#------------Politics Books in Amazon-----------#
+infomap <- cluster_table[[3]] %>% 
+  mutate (Cluster =  'x$membership' , n = sort(n))
+walktrap <- cluster_table[[6]] %>% 
+    mutate (Cluster =  'x$membership' , n = sort(n))
+
+
+knitr::kable (list (infomap[,1:2] , walktrap[,1:2]),
+              col.names = c ("Cluster" , "n"), 
+              caption = "Community Detection in Politics Books Network with Infomap (left) and Walktrap (right) algorithms")
+
+
+```
+For the terrorist websites network as well as for the Italian Gangs network both algorithms (Girvan-Newman and Louvain) return the same number of clusters (4 and 6 respectively). However, while the allocation of each node is the same for both algorithms in the case of the terrorist websites network, it varies in the Italian Gangs network. This robustness in the node allocation across clusters could point to a more clear delineation of communities in the case of the terrorist websites network. As for the books network, the Walktrap and Infomap algorithms, both based on random walks, return a different number of clusters. We observe two different communities clearly defined on the right and left side of the graphs with around 40 nodes each(graphs 14 and 15). However, the rest of the nodes differ in their allocation depending on the algorithm and form relatively small communities. 
+
+
+
+```{r}
+#9) For the directed network, make the symmetrisation with the strong rule, and repeat the community detection (with both algorithms). How did the symmetrisation affected the number of communities and their size?
+
+#----In the network I chose reciprocity is 0 so if I make it symetric with the strong rule it will result in an empty network. As a workaround, I'll do it with the weak rule. 
+
+# Strong: rule  i<->j iff i->j and i<-j 
+# Weak: i<->j iff i->j or i<-j 
+# With the strong rule we only get an edge between to nodes if the tie was reciprocal in the directed network. All non-reciprocated ties are removed. 
+
+network_books <- asNetwork(books) #The function for symmetrization is part of  sna, so  we have to convert the graph to network
+books_sym <- symmetrize(network_books , rule = "weak")
+
+#--- By using the weak rule I keep the number of edges intact (beacause there was not reciprocity in this network) but the results of the community detection algorithms may change since the random walks take the direction of the edge into account. 
+
+
+#-------- COMMUNITY DETECTION ALGORITHMS IN SYMMETRIC NETWORK-------------------#
+
+books_sym_graph <- graph_from_adjacency_matrix (books_sym, mode = "undirected") #---Again into a graph
+
+
+infomap_books_sym <- cluster_infomap (graph = books_sym_graph, modularity = FALSE) #---INFOMAP
+books_sym_walktrap <- cluster_walktrap(books_sym_graph, modularity = FALSE) #---WALKTRAP
+
+
+#-----------Number of clusters and nodes per cluster in symmetric graph-------------------#
+list_clust <- list (infomap_books_sym, books_sym_walktrap)
+
+cluster_t <- sapply ( list_clust, function (x) list (tabyl (dat = x$membership))) #Extracting cluster membership for every node
+
+#-------------Cluster detection in symmetric versus directed graph
+
+#------------INFOMAP
+
+infomap_communities <- cbind (cluster_t[[1]] , cluster_table [[3]])
+
+knitr::kable (infomap_communities [,c (1,2,5)] , col.names = c ("Cluster" , "Symmetric" , "Directed") , caption = "Amazon Books. Number of nodes per cluster before and after the symmetrization with INFOMAP  algorithm")
+
+#------------WALKTRAP
+
+walktrap_communities <- cbind (cluster_t[[2]] , cluster_table [[6]])
+
+knitr::kable (walktrap_communities [,c (1,2,5)] , col.names = c ("Cluster" , "Symmetric" , "Directed") , caption = "Amazon Books. Number of nodes per cluster before and after the symmetrization with WALKTRAP algorithm")
+```
+
+After symmetrization with the weak rule (the strong rule could not be applied because this network does not have reciprocity), the results of the community detection algorithms only vary in the case of the Infomap algorithm with the two biggest communities gaining some more nodes (table 10). The size of the communities remains the same when using Walktrap (table 11). However, this does not necessarily indicate that the nodes are allocated in the same clusters (e.g. node 27 could go from C1 to C2 and node 34 from C2 to C1, therefore maintaining the cluster size). 
+
+
+
+```{r}
+#10) Choose any of the networks, and make hierarchical clustering based on geodesics and visualize it (profile similarity and dendogram)? How did you choose number of groups? Are results of HC provide similar number of communities and their size as community detection algorithms?
+
+
+#Because the network has more than one component the distance between some of its nodes is Inf,  which can not be plotted with corrplot. Therefore I extract the largest component of the network for this task (there are only two components, with a small component of size 2).
+par (cex = 0.5)
+components <- decompose(ita_gangs, mode = "weak", max.comps = NA,
+  min.vertices = 0)
+adj_mat <- as_adjacency_matrix(components[[1]])
+adj_mat2 <- as.matrix(adj_mat)
+geodesics <- sna::geodist(adj_mat2)
+
+corrplot(geodesics$gdist,
+         is.corr = FALSE ,
+         title = "Profile Similarity of Italian Gangs" )
+
+
+```
+
+```{r}
+
+geo_dist <- geodesics$gdist
+clust_geo <- hclust(
+as.dist(geo_dist),    #the distance matrix we cluster
+method = "complete"   #the method of clustering
+)
+
+#decide about the number of clusters
+clusn <- 6
+
+#plot the dendrogram
+
+par (cex = 0.7 , font = 3)
+plot(clust_geo ,
+     cex.lab = 0.01,
+     main = "Italian Gangs. Hierachical Clustering"
+     )
+
+
+#save cluster memberships 
+geo_groups<-cutree(clust_geo, clusn)
+
+#---Make a table to compare how nodes are sorted with the louvain algorithm compared to the hierarchical clustering based on geodesics
+
+cluster_table[[4]] %>% 
+  transmute (Cluster = `x$membership` , Louvain = sort (n)) %>%
+  cbind(as.tibble(table(geo_groups))) %>% 
+  transmute (Cluster, Louvain , Hierarchical = sort(n)) %>% 
+  knitr::kable (caption = "Italian Gangs. Clusters created by Louvain algorithm and Hierarchical clustering based on geodesics")
+
+
+```
+
+
+
+The number of groups chosen for the hierarchical clustering based on geodesics (as taught in the lab) is arbitrary. What we can do is to choose the same number of clusters as in one of the algorithms for community detection previously used we can observed how the nodes are sorted by these two methods. This is not informative of which node goes where but it can give an impression of the different sizes of the clusters that are created. Table 12 shows the number of nodes per cluster extracted by the Louvain algorithm and the hierarchical clustering based on geodesics for the Italian Gangs network. While the former sort the nodes in a more "egalitarian" way across clusters, the hierarchical clustering, when forced to accommodate the same number of clusters as the Louvain algorithm, created a large cluster with 39 nodes, far from the second largest one, with only 18.
+
+
+Finally, it is difficult to asses what an interesting structure is in a network without reference to the mechanisms from which such structure might have emerged. In that sense, the Politics Books in Amazon network is quite interesting , because there seems to be two big communities or clusters quite clearly delineated. This makes me wonder to what extent these two communities of books align with political orientations. To asses that I would need to take a closer look at the books that belong to each of the hegemonic clusters and also to the algorithm behind amazon's recommendation system. However, if we assume that Amazon recommends only books that are typically purchased together (as they claim) these two book communities might be well described by the republican - democrat, or right-left divide. For this reason, the structure of this network seems the most interesting, because it could relate to some attributes of the books quite clearly (this is just a hypothesis). Another interesting structural feature in one of the networks is the substantial differences in degree and betweenness in the Italian Gangs network. There seem to be some hubs in the network,  which might either be related to information flows or influence/power.  
+
+
+
